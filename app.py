@@ -2569,27 +2569,31 @@ def main():
                     # Obtener cuánto ya pagó Ricardo para este gasto
                     ya_pago = 0
                     
-                    # Si es un grupo, necesitamos sumar los pagos de todos los gastos del grupo
-                    if str(gasto_id).startswith('grupo_'):
-                        grupo_id = int(str(gasto_id).replace('grupo_', ''))
-                        query = """
-                            SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
-                            FROM pagos p
-                            INNER JOIN gastos_en_grupo geg ON p.id_gasto = geg.gasto_id
-                            WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Ricardo'
-                        """
-                        cursor.execute(query, (grupo_id, mes_seleccionado, anio_seleccionado))
-                        result = cursor.fetchone()
-                        ya_pago = result[0] if result else 0
-                    else:
-                        query = """
-                            SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
-                            FROM pagos
-                            WHERE id_gasto = ? AND mes = ? AND anio = ? AND quien_pago = 'Ricardo'
-                        """
-                        cursor.execute(query, (gasto_id, mes_seleccionado, anio_seleccionado))
-                        result = cursor.fetchone()
-                        ya_pago = result[0] if result else 0
+                    try:
+                        # Si es un grupo, necesitamos sumar los pagos de todos los gastos del grupo
+                        if str(gasto_id).startswith('grupo_'):
+                            grupo_id = int(str(gasto_id).replace('grupo_', ''))
+                            query = """
+                                SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
+                                FROM pagos p
+                                INNER JOIN gastos_en_grupo geg ON p.id_gasto = geg.gasto_id
+                                WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Ricardo'
+                            """
+                            cursor.execute(query, (grupo_id, mes_seleccionado, anio_seleccionado))
+                            result = cursor.fetchone()
+                            ya_pago = result[0] if result else 0
+                        else:
+                            query = """
+                                SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
+                                FROM pagos
+                                WHERE id_gasto = ? AND mes = ? AND anio = ? AND quien_pago = 'Ricardo'
+                            """
+                            cursor.execute(query, (gasto_id, mes_seleccionado, anio_seleccionado))
+                            result = cursor.fetchone()
+                            ya_pago = result[0] if result else 0
+                    except Exception as e:
+                        # Si hay error en la consulta, asumir que no ha pagado nada
+                        ya_pago = 0
                     
                     pendiente = debe_pagar_total - ya_pago
                     
@@ -2669,27 +2673,31 @@ def main():
                     # Obtener cuánto ya pagó Wendy para este gasto
                     ya_pago = 0
                     
-                    # Si es un grupo, necesitamos sumar los pagos de todos los gastos del grupo
-                    if str(gasto_id).startswith('grupo_'):
-                        grupo_id = int(str(gasto_id).replace('grupo_', ''))
-                        query = """
-                            SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
-                            FROM pagos p
-                            INNER JOIN gastos_en_grupo geg ON p.id_gasto = geg.gasto_id
-                            WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Wendy'
-                        """
-                        cursor.execute(query, (grupo_id, mes_seleccionado, anio_seleccionado))
-                        result = cursor.fetchone()
-                        ya_pago = result[0] if result else 0
-                    else:
-                        query = """
-                            SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
-                            FROM pagos
-                            WHERE id_gasto = ? AND mes = ? AND anio = ? AND quien_pago = 'Wendy'
-                        """
-                        cursor.execute(query, (gasto_id, mes_seleccionado, anio_seleccionado))
-                        result = cursor.fetchone()
-                        ya_pago = result[0] if result else 0
+                    try:
+                        # Si es un grupo, necesitamos sumar los pagos de todos los gastos del grupo
+                        if str(gasto_id).startswith('grupo_'):
+                            grupo_id = int(str(gasto_id).replace('grupo_', ''))
+                            query = """
+                                SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
+                                FROM pagos p
+                                INNER JOIN gastos_en_grupo geg ON p.id_gasto = geg.gasto_id
+                                WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Wendy'
+                            """
+                            cursor.execute(query, (grupo_id, mes_seleccionado, anio_seleccionado))
+                            result = cursor.fetchone()
+                            ya_pago = result[0] if result else 0
+                        else:
+                            query = """
+                                SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
+                                FROM pagos
+                                WHERE id_gasto = ? AND mes = ? AND anio = ? AND quien_pago = 'Wendy'
+                            """
+                            cursor.execute(query, (gasto_id, mes_seleccionado, anio_seleccionado))
+                            result = cursor.fetchone()
+                            ya_pago = result[0] if result else 0
+                    except Exception as e:
+                        # Si hay error en la consulta, asumir que no ha pagado nada
+                        ya_pago = 0
                     
                     pendiente = debe_pagar_total - ya_pago
                     
