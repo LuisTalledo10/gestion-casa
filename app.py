@@ -2573,7 +2573,7 @@ def main():
                         query = """
                             SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
                             FROM pagos p
-                            INNER JOIN gastos_en_grupo geg ON p.id_gasto = geg.gasto_id
+                            INNER JOIN gastos_en_grupo geg ON p.gasto_id = geg.gasto_id
                             WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Ricardo'
                         """
                         cursor.execute(query, (grupo_id, mes_seleccionado, anio_seleccionado))
@@ -2583,18 +2583,14 @@ def main():
                         query = """
                             SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
                             FROM pagos
-                            WHERE id_gasto = ? AND mes = ? AND anio = ? AND quien_pago = 'Ricardo'
+                            WHERE gasto_id = ? AND mes = ? AND anio = ? AND quien_pago = 'Ricardo'
                         """
                         cursor.execute(query, (gasto_id, mes_seleccionado, anio_seleccionado))
                         result = cursor.fetchone()
                         ya_pago = result[0] if result else 0
-                        # Debug: mostrar consulta para verificar
-                        st.write(f"🔍 Debug gasto {gasto_id} ({concepto}): debe=${debe_pagar_total:.2f}, pagó=${ya_pago:.2f}, pendiente=${debe_pagar_total - ya_pago:.2f}")
                 except Exception as e:
                     # Si hay error en la consulta, asumir que no ha pagado nada
                     ya_pago = 0
-                    # Debug
-                    st.error(f"❌ Error consultando pagos para {concepto}: {str(e)}")
                 
                 pendiente = debe_pagar_total - ya_pago
                 
@@ -2678,7 +2674,7 @@ def main():
                         query = """
                             SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
                             FROM pagos p
-                            INNER JOIN gastos_en_grupo geg ON p.id_gasto = geg.gasto_id
+                            INNER JOIN gastos_en_grupo geg ON p.gasto_id = geg.gasto_id
                             WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Wendy'
                         """
                         cursor.execute(query, (grupo_id, mes_seleccionado, anio_seleccionado))
@@ -2688,7 +2684,7 @@ def main():
                         query = """
                             SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
                             FROM pagos
-                            WHERE id_gasto = ? AND mes = ? AND anio = ? AND quien_pago = 'Wendy'
+                            WHERE gasto_id = ? AND mes = ? AND anio = ? AND quien_pago = 'Wendy'
                         """
                         cursor.execute(query, (gasto_id, mes_seleccionado, anio_seleccionado))
                         result = cursor.fetchone()
