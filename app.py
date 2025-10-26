@@ -481,21 +481,27 @@ def eliminar_grupo_distribucion(conn, grupo_id):
 def calcular_semanas_del_mes(mes, anio):
     """
     Calcula cuántas semanas (lunes a domingo) hay en un mes.
-    Una semana que toca el mes cuenta como 1, aunque cruce al mes siguiente.
+    Solo cuenta semanas que comienzan (lunes) dentro del mes.
     """
-    # Primer día del mes
+    # Primer y último día del mes
     primer_dia = date(anio, mes, 1)
     ultimo_dia = date(anio, mes, calendar.monthrange(anio, mes)[1])
     
-    # Encontrar el primer lunes del mes (o antes si el mes no empieza en lunes)
-    dias_hasta_lunes = (7 - primer_dia.weekday()) % 7  # weekday: 0=lunes, 6=domingo
-    if dias_hasta_lunes == 0:
+    # Encontrar el primer lunes del mes (dentro del mes, no antes)
+    if primer_dia.weekday() == 0:  # Ya es lunes
         primer_lunes = primer_dia
     else:
-        # Si el mes no empieza en lunes, la "semana 1" empieza el lunes anterior
-        primer_lunes = primer_dia - timedelta(days=primer_dia.weekday())
+        # Avanzar al siguiente lunes dentro del mes
+        dias_hasta_lunes = (7 - primer_dia.weekday()) % 7
+        if dias_hasta_lunes == 0:
+            dias_hasta_lunes = 7
+        primer_lunes = primer_dia + timedelta(days=dias_hasta_lunes)
     
-    # Contar semanas desde el primer lunes hasta que se pase del último día
+    # Si el primer lunes está fuera del mes, no hay semanas completas
+    if primer_lunes > ultimo_dia:
+        return 0
+    
+    # Contar semanas desde el primer lunes hasta el último día del mes
     semanas = 0
     fecha_actual = primer_lunes
     while fecha_actual <= ultimo_dia:
@@ -507,18 +513,22 @@ def calcular_semanas_del_mes(mes, anio):
 def obtener_rango_semana(mes, anio, numero_semana):
     """
     Obtiene el rango de fechas de una semana específica del mes.
-    Las semanas van de lunes a domingo y pueden cruzar al mes siguiente.
+    Las semanas van de lunes a domingo.
+    Retorna el rango solo para semanas que empiezan dentro del mes.
     Returns: (fecha_inicio, fecha_fin) como strings 'dd/mm'
     """
     # Primer día del mes
     primer_dia = date(anio, mes, 1)
     
-    # Encontrar el primer lunes (puede ser del mes anterior)
+    # Encontrar el primer lunes dentro del mes
     if primer_dia.weekday() == 0:  # Ya es lunes
         primer_lunes = primer_dia
     else:
-        # Retroceder al lunes anterior
-        primer_lunes = primer_dia - timedelta(days=primer_dia.weekday())
+        # Avanzar al siguiente lunes dentro del mes
+        dias_hasta_lunes = (7 - primer_dia.weekday()) % 7
+        if dias_hasta_lunes == 0:
+            dias_hasta_lunes = 7
+        primer_lunes = primer_dia + timedelta(days=dias_hasta_lunes)
     
     # Calcular inicio de la semana solicitada (lunes)
     fecha_inicio = primer_lunes + timedelta(days=(numero_semana - 1) * 7)
