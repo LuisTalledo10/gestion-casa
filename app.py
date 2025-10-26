@@ -83,6 +83,32 @@ def conectar_db():
         )
     ''')
     
+    # Crear tabla de grupos de distribución
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS grupos_distribucion (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            descripcion TEXT,
+            monto_fijo_ricardo REAL DEFAULT NULL,
+            monto_fijo_wendy REAL DEFAULT NULL,
+            quien_paga_fijo TEXT NOT NULL,
+            activo INTEGER DEFAULT 1,
+            fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Crear tabla de gastos en grupo
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS gastos_en_grupo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            grupo_id INTEGER NOT NULL,
+            gasto_id INTEGER NOT NULL,
+            FOREIGN KEY (grupo_id) REFERENCES grupos_distribucion(id),
+            FOREIGN KEY (gasto_id) REFERENCES gastos_mensuales(id),
+            UNIQUE(grupo_id, gasto_id)
+        )
+    ''')
+    
     conn.commit()
     return conn
 
