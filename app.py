@@ -200,26 +200,40 @@ def obtener_monto_del_mes(conn, gasto_id, mes, anio):
 def establecer_monto_del_mes(conn, gasto_id, mes, anio, monto):
     """
     Establece un monto específico para un gasto en un mes determinado.
+    Si ya existe, lo actualiza; si no existe, lo crea.
     """
     cursor = conn.cursor()
     fecha_actual = datetime.now().strftime('%Y-%m-%d')
     
     try:
+        # Verificar si ya existe un registro para este gasto en este mes
         cursor.execute('''
-            INSERT INTO montos_mensuales (gasto_id, mes, anio, monto_total, fecha_registro)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (gasto_id, mes, anio, monto, fecha_actual))
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        # Si ya existe, actualizarlo
-        cursor.execute('''
-            UPDATE montos_mensuales
-            SET monto_total = ?, fecha_registro = ?
+            SELECT id FROM montos_mensuales
             WHERE gasto_id = ? AND mes = ? AND anio = ?
-        ''', (monto, fecha_actual, gasto_id, mes, anio))
+        ''', (gasto_id, mes, anio))
+        
+        existe = cursor.fetchone()
+        
+        if existe:
+            # Actualizar el registro existente
+            cursor.execute('''
+                UPDATE montos_mensuales
+                SET monto_total = ?, fecha_registro = ?
+                WHERE gasto_id = ? AND mes = ? AND anio = ?
+            ''', (monto, fecha_actual, gasto_id, mes, anio))
+        else:
+            # Insertar nuevo registro
+            cursor.execute('''
+                INSERT INTO montos_mensuales (gasto_id, mes, anio, monto_total, fecha_registro)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (gasto_id, mes, anio, monto, fecha_actual))
+        
         conn.commit()
         return True
+    except Exception as e:
+        conn.rollback()
+        print(f"Error al establecer monto del mes: {e}")
+        return False
 
 def obtener_montos_configurados(conn, mes, anio):
     """
@@ -1301,8 +1315,13 @@ def main():
         with st.expander("✏️ Editar Montos de este Mes (Luz, Agua, Internet, etc.)"):
             st.write("**Los gastos como luz, agua e internet varían cada mes. Aquí puedes ajustar sus montos.**")
             st.caption("📝 Los montos editados solo afectarán a este mes, no a los meses anteriores o futuros.")
+            st.caption("ℹ️ Solo se muestran gastos con monto **variable**. Los gastos fijos no se pueden editar aquí.")
             
             gastos_config = obtener_montos_configurados(conn, mes_seleccionado, anio_seleccionado)
+            
+            # Filtrar solo los gastos VARIABLES
+            if not gastos_config.empty:
+                gastos_config = gastos_config[gastos_config['tipo_monto'] == 'variable']
             
             if not gastos_config.empty:
                 for idx, gasto in gastos_config.iterrows():
@@ -1364,10 +1383,13 @@ def main():
                                 
                                 # Botón para guardar
                                 if st.button("💾 Guardar montos del grupo", key=f"guardar_grupo_{gasto['id']}", type="primary"):
-                                    if establecer_monto_del_mes(conn, gasto['id'], mes_seleccionado, anio_seleccionado, total_calculado):
+                                    resultado = establecer_monto_del_mes(conn, gasto['id'], mes_seleccionado, anio_seleccionado, total_calculado)
+                                    if resultado:
                                         st.success(f"✅ Montos actualizados para {gasto['grupo']}")
                                         st.caption(f"Desglose guardado: {' | '.join([f'{g}: ${m:.2f}' for g, m in zip(gastos_individuales, montos_individuales)])}")
                                         st.rerun()
+                                    else:
+                                        st.error("❌ Error al guardar los montos del grupo")
                             
                             st.markdown("---")
                     
@@ -1395,13 +1417,16 @@ def main():
                         
                         with col3:
                             if st.button("💾", key=f"guardar_monto_{gasto['id']}", help="Guardar monto"):
-                                if establecer_monto_del_mes(conn, gasto['id'], mes_seleccionado, anio_seleccionado, nuevo_monto):
-                                    st.success("✅")
+                                resultado = establecer_monto_del_mes(conn, gasto['id'], mes_seleccionado, anio_seleccionado, nuevo_monto)
+                                if resultado:
+                                    st.success("✅ Guardado")
                                     st.rerun()
+                                else:
+                                    st.error("❌ Error al guardar")
                         
                         st.markdown("---")
             else:
-                st.info("No hay gastos configurados. Ve a 'Gestionar Gastos' para agregar.")
+                st.info("ℹ️ No hay gastos **variables** configurados en este momento. Los gastos con montos fijos no se muestran aquí.")
         
         st.markdown("---")
         
