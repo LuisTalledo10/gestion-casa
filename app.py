@@ -1,4 +1,4 @@
-"""
+﻿"""
 Aplicación de Gestión de Contabilidad Doméstica
 Sistema de gastos compartidos entre Ricardo y Wendy
 
@@ -729,8 +729,8 @@ def calcular_tabla_mensual(conn, mes, anio):
             'Concepto': concepto_grupo + " 💰" + quien_paga[0],  # 💰R o 💰W
             'Monto Total': monto_total_grupo,
             'Frecuencia': 'Grupo',
-            'Debe Ricardo': monto_ricardo,
-            'Debe Wendy': monto_wendy,
+            'Asignado Ricardo': monto_ricardo,
+            'Asignado Wendy': monto_wendy,
             'Ricardo Pagó': '✅' if ricardo_pago else '❌',
             'Wendy Pagó': '✅' if wendy_pago else '❌'
         })
@@ -801,8 +801,8 @@ def calcular_tabla_mensual(conn, mes, anio):
             'Concepto': concepto_con_info + indicador + dist_tag,
             'Monto Total': monto_total,
             'Frecuencia': frecuencia,
-            'Debe Ricardo': monto_ricardo,
-            'Debe Wendy': monto_wendy,
+            'Asignado Ricardo': monto_ricardo,
+            'Asignado Wendy': monto_wendy,
             'Ricardo Pagó': '✅' if ricardo_pago else '❌',
             'Wendy Pagó': '✅' if wendy_pago else '❌'
         })
@@ -812,44 +812,106 @@ def calcular_tabla_mensual(conn, mes, anio):
 def calcular_saldo_neto(conn, mes, anio):
     """
     Calcula el saldo neto de deuda entre Ricardo y Wendy para un mes específico.
-    Usa los montos específicos del mes si existen.
+    Usa la misma lógica que la tabla mensual: calcula lo pagado vs lo que debe cada uno.
     """
-    gastos_df = obtener_montos_configurados(conn, mes, anio)
+    # Obtener la tabla mensual con los montos que debe cada uno
+    tabla_df = calcular_tabla_mensual(conn, mes, anio)
     
-    # Total que debe pagar cada uno
-    total_debe_cada_uno = (gastos_df['monto_total'].sum() / 2) if not gastos_df.empty else 0.0
+    if tabla_df.empty:
+        return {
+            'total_debe_cada_uno': 0.0,
+            'pagado_ricardo': 0.0,
+            'pagado_wendy': 0.0,
+            'saldo_ricardo': 0.0,
+            'saldo_wendy': 0.0,
+            'mensaje': "No hay gastos configurados para este mes"
+        }
     
-    # Total pagado por cada uno
+    # Calcular el total que debe pagar cada uno (suma de todos sus gastos)
+    total_debe_ricardo = tabla_df['Asignado Ricardo'].sum()
+    total_debe_wendy = tabla_df['Asignado Wendy'].sum()
+    
+    # Calcular cuánto ha pagado cada uno usando la misma lógica de la tabla
     cursor = conn.cursor()
     
-    cursor.execute('''
-        SELECT SUM(monto_pagado) FROM pagos
-        WHERE mes = ? AND anio = ? AND quien_pago = 'Ricardo'
-    ''', (mes, anio))
-    pagado_ricardo = cursor.fetchone()[0] or 0.0
+    pagado_ricardo_total = 0.0
+    pagado_wendy_total = 0.0
     
-    cursor.execute('''
-        SELECT SUM(monto_pagado) FROM pagos
-        WHERE mes = ? AND anio = ? AND quien_pago = 'Wendy'
-    ''', (mes, anio))
-    pagado_wendy = cursor.fetchone()[0] or 0.0
+    for _, row in tabla_df.iterrows():
+        gasto_id = row['id']
+        
+        # Calcular pagado por Ricardo
+        try:
+            if str(gasto_id).startswith('grupo_'):
+                grupo_id = int(str(gasto_id).replace('grupo_', ''))
+                query = """
+                    SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
+                    FROM pagos p
+                    INNER JOIN gastos_en_grupo geg ON p.gasto_id = geg.gasto_id
+                    WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Ricardo'
+                """
+                cursor.execute(query, (grupo_id, mes, anio))
+            else:
+                query = """
+                    SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
+                    FROM pagos
+                    WHERE gasto_id = ? AND mes = ? AND anio = ? AND quien_pago = 'Ricardo'
+                """
+                cursor.execute(query, (gasto_id, mes, anio))
+            
+            result = cursor.fetchone()
+            pagado_ricardo_total += result[0] if result else 0.0
+        except:
+            pass
+        
+        # Calcular pagado por Wendy
+        try:
+            if str(gasto_id).startswith('grupo_'):
+                grupo_id = int(str(gasto_id).replace('grupo_', ''))
+                query = """
+                    SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
+                    FROM pagos p
+                    INNER JOIN gastos_en_grupo geg ON p.gasto_id = geg.gasto_id
+                    WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Wendy'
+                """
+                cursor.execute(query, (grupo_id, mes, anio))
+            else:
+                query = """
+                    SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
+                    FROM pagos
+                    WHERE gasto_id = ? AND mes = ? AND anio = ? AND quien_pago = 'Wendy'
+                """
+                cursor.execute(query, (gasto_id, mes, anio))
+            
+            result = cursor.fetchone()
+            pagado_wendy_total += result[0] if result else 0.0
+        except:
+            pass
     
-    # Calcular saldo
-    saldo_ricardo = total_debe_cada_uno - pagado_ricardo
-    saldo_wendy = total_debe_cada_uno - pagado_wendy
+    # Calcular saldo (pendiente)
+    saldo_ricardo = max(0, total_debe_ricardo - pagado_ricardo_total)
+    saldo_wendy = max(0, total_debe_wendy - pagado_wendy_total)
     
-    # Determinar quién le debe a quién
-    if saldo_ricardo > 0.01:
-        mensaje = f"Ricardo debe pagar ${abs(saldo_ricardo):.2f}"
+    # Determinar mensaje
+    if saldo_ricardo > 0.01 and saldo_wendy > 0.01:
+        mensaje = f"Ricardo debe ${saldo_ricardo:.2f} y Wendy debe ${saldo_wendy:.2f}"
+    elif saldo_ricardo > 0.01:
+        mensaje = f"Ricardo debe pagar ${saldo_ricardo:.2f}"
     elif saldo_wendy > 0.01:
-        mensaje = f"Wendy debe pagar ${abs(saldo_wendy):.2f}"
+        mensaje = f"Wendy debe pagar ${saldo_wendy:.2f}"
     else:
         mensaje = "Todo pagado este mes ✅"
     
+    # Para mantener compatibilidad con el código existente, devolvemos total_debe_cada_uno
+    # como el promedio (aunque ahora cada uno puede deber diferente)
+    total_debe_cada_uno = (total_debe_ricardo + total_debe_wendy) / 2
+    
     return {
         'total_debe_cada_uno': total_debe_cada_uno,
-        'pagado_ricardo': pagado_ricardo,
-        'pagado_wendy': pagado_wendy,
+        'total_debe_ricardo': total_debe_ricardo,
+        'total_debe_wendy': total_debe_wendy,
+        'pagado_ricardo': pagado_ricardo_total,
+        'pagado_wendy': pagado_wendy_total,
         'saldo_ricardo': saldo_ricardo,
         'saldo_wendy': saldo_wendy,
         'mensaje': mensaje
@@ -991,16 +1053,26 @@ def generar_pdf_reporte_general(conn, mes, anio):
     
     saldo = calcular_saldo_neto(conn, mes, anio)
     
+    # Calcular porcentajes basados en lo que cada uno debe pagar
+    total_debe_ricardo = saldo.get('total_debe_ricardo', saldo['total_debe_cada_uno'])
+    total_debe_wendy = saldo.get('total_debe_wendy', saldo['total_debe_cada_uno'])
+    
+    ricardo_porcentaje = (saldo['pagado_ricardo'] / total_debe_ricardo * 100) if total_debe_ricardo > 0 else 0
+    wendy_porcentaje = (saldo['pagado_wendy'] / total_debe_wendy * 100) if total_debe_wendy > 0 else 0
+    
     data_resumen = [
         ['Concepto', 'Monto'],
-        ['Total de Gastos Mensuales', f"${saldo['total_debe_cada_uno'] * 2:.2f}"],
-        ['Debe pagar cada uno (50/50)', f"${saldo['total_debe_cada_uno']:.2f}"],
+        ['Total de Gastos Mensuales', f"${(total_debe_ricardo + total_debe_wendy):.2f}"],
         ['', ''],
-        ['Ha pagado Ricardo', f"${saldo['pagado_ricardo']:.2f}"],
-        ['Ha pagado Wendy', f"${saldo['pagado_wendy']:.2f}"],
+        ['Ricardo - Debe Pagar', f"${total_debe_ricardo:.2f}"],
+        ['Ricardo - Ya Pagó', f"${saldo['pagado_ricardo']:.2f}"],
+        ['Ricardo - Pendiente', f"${saldo['saldo_ricardo']:.2f}"],
+        ['Ricardo - Progreso', f"{ricardo_porcentaje:.0f}%"],
         ['', ''],
-        ['Pendiente Ricardo', f"${saldo['saldo_ricardo']:.2f}"],
-        ['Pendiente Wendy', f"${saldo['saldo_wendy']:.2f}"],
+        ['Wendy - Debe Pagar', f"${total_debe_wendy:.2f}"],
+        ['Wendy - Ya Pagó', f"${saldo['pagado_wendy']:.2f}"],
+        ['Wendy - Pendiente', f"${saldo['saldo_wendy']:.2f}"],
+        ['Wendy - Progreso', f"{wendy_porcentaje:.0f}%"],
     ]
     
     tabla_resumen = Table(data_resumen, colWidths=[4*inch, 2*inch])
@@ -1014,9 +1086,14 @@ def generar_pdf_reporte_general(conn, mes, anio):
         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('FONTNAME', (0, 3), (-1, 3), 'Helvetica-Bold'),
-        ('FONTNAME', (0, 6), (-1, 6), 'Helvetica-Bold'),
-        ('BACKGROUND', (0, 7), (-1, -1), colors.HexColor('#FFE5CC')),
+        ('FONTNAME', (0, 2), (-1, 2), 'Helvetica-Bold'),  # Línea vacía
+        ('FONTNAME', (0, 7), (-1, 7), 'Helvetica-Bold'),  # Línea vacía
+        ('BACKGROUND', (0, 3), (0, 6), colors.HexColor('#D6EAF8')),  # Ricardo - azul claro
+        ('BACKGROUND', (0, 8), (0, 11), colors.HexColor('#FCE4EC')),  # Wendy - rosa claro
+        ('FONTNAME', (0, 3), (-1, 3), 'Helvetica-Bold'),  # Debe Ricardo
+        ('FONTNAME', (0, 8), (-1, 8), 'Helvetica-Bold'),  # Debe Wendy
+        ('FONTNAME', (0, 6), (-1, 6), 'Helvetica-Bold'),  # Progreso Ricardo
+        ('FONTNAME', (0, 11), (-1, 11), 'Helvetica-Bold'),  # Progreso Wendy
     ]))
     
     elements.append(tabla_resumen)
@@ -1028,27 +1105,68 @@ def generar_pdf_reporte_general(conn, mes, anio):
     elements.append(estado_texto)
     elements.append(Spacer(1, 0.3*inch))
     
-    # Detalle de Gastos
-    elements.append(Paragraph("DETALLE DE GASTOS Y PAGOS", heading_style))
+    # Detalle de Gastos - TABLA DE RICARDO
+    elements.append(Paragraph("TABLA DE RICARDO", heading_style))
     
     tabla_df = calcular_tabla_mensual(conn, mes, anio)
     
     if not tabla_df.empty:
-        data_gastos = [['Gasto', 'Monto Total', 'Ricardo Debe', 'Ricardo Pagó', 'Wendy Debe', 'Wendy Pagó']]
+        # Agregar columnas de monto pagado y pendiente
+        cursor = conn.cursor()
+        
+        tabla_df['Ricardo Pagado'] = 0.0
+        tabla_df['Ricardo Pendiente'] = 0.0
+        tabla_df['Ricardo %'] = 0.0
+        
+        for idx, row in tabla_df.iterrows():
+            gasto_id = row['id']
+            debe_ricardo = row['Asignado Ricardo']
+            
+            # Calcular para Ricardo
+            try:
+                if str(gasto_id).startswith('grupo_'):
+                    grupo_id = int(str(gasto_id).replace('grupo_', ''))
+                    query = """
+                        SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
+                        FROM pagos p
+                        INNER JOIN gastos_en_grupo geg ON p.gasto_id = geg.gasto_id
+                        WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Ricardo'
+                    """
+                    cursor.execute(query, (grupo_id, mes, anio))
+                else:
+                    query = """
+                        SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
+                        FROM pagos
+                        WHERE gasto_id = ? AND mes = ? AND anio = ? AND quien_pago = 'Ricardo'
+                    """
+                    cursor.execute(query, (gasto_id, mes, anio))
+                
+                result = cursor.fetchone()
+                ricardo_pagado = result[0] if result else 0.0
+                ricardo_pendiente = max(0, debe_ricardo - ricardo_pagado)
+                ricardo_porcentaje = (ricardo_pagado / debe_ricardo * 100) if debe_ricardo > 0 else 0
+                
+                tabla_df.at[idx, 'Ricardo Pagado'] = ricardo_pagado
+                tabla_df.at[idx, 'Ricardo Pendiente'] = ricardo_pendiente
+                tabla_df.at[idx, 'Ricardo %'] = ricardo_porcentaje
+            except:
+                pass
+        
+        # Tabla Ricardo
+        data_ricardo = [['Gasto', 'Asignado', 'Pagado', 'Pendiente', 'Progreso']]
         
         for _, row in tabla_df.iterrows():
-            data_gastos.append([
+            data_ricardo.append([
                 row['Concepto'],
-                f"${row['Monto Total']:.2f}",
-                f"${row['Debe Ricardo']:.2f}",
-                row['Ricardo Pagó'],
-                f"${row['Debe Wendy']:.2f}",
-                row['Wendy Pagó']
+                f"${row['Asignado Ricardo']:.2f}",
+                f"${row['Ricardo Pagado']:.2f}",
+                f"${row['Ricardo Pendiente']:.2f}",
+                f"{row['Ricardo %']:.0f}%"
             ])
         
-        tabla_gastos = Table(data_gastos, colWidths=[1.5*inch, 1*inch, 1*inch, 0.8*inch, 1*inch, 0.8*inch])
-        tabla_gastos.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2ECC71')),
+        tabla_ricardo = Table(data_ricardo, colWidths=[2*inch, 1.2*inch, 1.2*inch, 1.2*inch, 1*inch])
+        tabla_ricardo.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498DB')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -1059,7 +1177,76 @@ def generar_pdf_reporte_general(conn, mes, anio):
             ('FONTSIZE', (0, 1), (-1, -1), 9),
         ]))
         
-        elements.append(tabla_gastos)
+        elements.append(tabla_ricardo)
+        elements.append(Spacer(1, 0.3*inch))
+        
+        # TABLA DE WENDY
+        elements.append(Paragraph("TABLA DE WENDY", heading_style))
+        
+        # Calcular para Wendy
+        tabla_df['Wendy Pagado'] = 0.0
+        tabla_df['Wendy Pendiente'] = 0.0
+        tabla_df['Wendy %'] = 0.0
+        
+        for idx, row in tabla_df.iterrows():
+            gasto_id = row['id']
+            debe_wendy = row['Asignado Wendy']
+            
+            try:
+                if str(gasto_id).startswith('grupo_'):
+                    grupo_id = int(str(gasto_id).replace('grupo_', ''))
+                    query = """
+                        SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
+                        FROM pagos p
+                        INNER JOIN gastos_en_grupo geg ON p.gasto_id = geg.gasto_id
+                        WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Wendy'
+                    """
+                    cursor.execute(query, (grupo_id, mes, anio))
+                else:
+                    query = """
+                        SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
+                        FROM pagos
+                        WHERE gasto_id = ? AND mes = ? AND anio = ? AND quien_pago = 'Wendy'
+                    """
+                    cursor.execute(query, (gasto_id, mes, anio))
+                
+                result = cursor.fetchone()
+                wendy_pagado = result[0] if result else 0.0
+                wendy_pendiente = max(0, debe_wendy - wendy_pagado)
+                wendy_porcentaje = (wendy_pagado / debe_wendy * 100) if debe_wendy > 0 else 0
+                
+                tabla_df.at[idx, 'Wendy Pagado'] = wendy_pagado
+                tabla_df.at[idx, 'Wendy Pendiente'] = wendy_pendiente
+                tabla_df.at[idx, 'Wendy %'] = wendy_porcentaje
+            except:
+                pass
+        
+        # Tabla Wendy
+        data_wendy = [['Gasto', 'Asignado', 'Pagado', 'Pendiente', 'Progreso']]
+        
+        for _, row in tabla_df.iterrows():
+            data_wendy.append([
+                row['Concepto'],
+                f"${row['Asignado Wendy']:.2f}",
+                f"${row['Wendy Pagado']:.2f}",
+                f"${row['Wendy Pendiente']:.2f}",
+                f"{row['Wendy %']:.0f}%"
+            ])
+        
+        tabla_wendy = Table(data_wendy, colWidths=[2*inch, 1.2*inch, 1.2*inch, 1.2*inch, 1*inch])
+        tabla_wendy.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E91E63')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ]))
+        
+        elements.append(tabla_wendy)
     else:
         elements.append(Paragraph("No hay gastos registrados para este mes.", styles['Normal']))
     
@@ -1148,14 +1335,24 @@ def generar_pdf_reporte_individual(conn, mes, anio, persona):
     
     saldo = calcular_saldo_neto(conn, mes, anio)
     
-    pagado = saldo['pagado_ricardo'] if persona == 'Ricardo' else saldo['pagado_wendy']
-    pendiente = saldo['saldo_ricardo'] if persona == 'Ricardo' else saldo['saldo_wendy']
+    # Obtener el total específico que debe esta persona
+    if persona == 'Ricardo':
+        total_debe = saldo.get('total_debe_ricardo', saldo['total_debe_cada_uno'])
+        pagado = saldo['pagado_ricardo']
+        pendiente = saldo['saldo_ricardo']
+    else:
+        total_debe = saldo.get('total_debe_wendy', saldo['total_debe_cada_uno'])
+        pagado = saldo['pagado_wendy']
+        pendiente = saldo['saldo_wendy']
+    
+    porcentaje = (pagado / total_debe * 100) if total_debe > 0 else 0
     
     data_personal = [
         ['Concepto', 'Monto'],
-        ['Total a pagar este mes (50%)', f"${saldo['total_debe_cada_uno']:.2f}"],
+        ['Total a pagar este mes', f"${total_debe:.2f}"],
         ['Ya pagado', f"${pagado:.2f}"],
         ['Pendiente por pagar', f"${pendiente:.2f}"],
+        ['Progreso de pago', f"{porcentaje:.0f}%"],
     ]
     
     tabla_personal = Table(data_personal, colWidths=[4*inch, 2*inch])
@@ -1169,37 +1366,68 @@ def generar_pdf_reporte_individual(conn, mes, anio, persona):
         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTNAME', (0, -2), (-1, -2), 'Helvetica-Bold'),
         ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#FFE5CC')),
+        ('BACKGROUND', (0, -2), (-1, -2), colors.HexColor('#FFE5CC')),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#D5F4E6')),
     ]))
     
     elements.append(tabla_personal)
     elements.append(Spacer(1, 0.3*inch))
     
     # Estado de Pagos por Gasto
-    elements.append(Paragraph(f"GASTOS QUE DEBE PAGAR {persona.upper()}", heading_style))
+    elements.append(Paragraph(f"GASTOS ASIGNADOS A {persona.upper()}", heading_style))
     
     tabla_df = calcular_tabla_mensual(conn, mes, anio)
     
     if not tabla_df.empty:
-        columna_pago = f'{persona} Pagó'
-        data_gastos = [['Gasto', 'Monto a Pagar', 'Estado', 'Observaciones']]
+        # Calcular pagado y pendiente para cada gasto
+        cursor = conn.cursor()
+        
+        columna_asignado = f'Asignado {persona}'
+        data_gastos = [['Gasto', 'Asignado', 'Ya Pagó', 'Pendiente', 'Progreso']]
         
         for _, row in tabla_df.iterrows():
-            estado = row[columna_pago]
-            estado_texto = "PAGADO" if estado == '✅' else "PENDIENTE"
-            observacion = "Todo OK" if estado == '✅' else "¡Falta pagar!"
+            gasto_id = row['id']
+            asignado = row[columna_asignado]
             
-            monto_pagar = row[f'Debe {persona}']
+            # Calcular monto pagado
+            pagado = 0.0
+            try:
+                if str(gasto_id).startswith('grupo_'):
+                    grupo_id = int(str(gasto_id).replace('grupo_', ''))
+                    query = """
+                        SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
+                        FROM pagos p
+                        INNER JOIN gastos_en_grupo geg ON p.gasto_id = geg.gasto_id
+                        WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = ?
+                    """
+                    cursor.execute(query, (grupo_id, mes, anio, persona))
+                else:
+                    query = """
+                        SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
+                        FROM pagos
+                        WHERE gasto_id = ? AND mes = ? AND anio = ? AND quien_pago = ?
+                    """
+                    cursor.execute(query, (gasto_id, mes, anio, persona))
+                
+                result = cursor.fetchone()
+                pagado = result[0] if result else 0.0
+            except:
+                pass
+            
+            pendiente = max(0, asignado - pagado)
+            porcentaje = (pagado / asignado * 100) if asignado > 0 else 0
             
             data_gastos.append([
                 row['Concepto'],
-                f"${monto_pagar:.2f}",
-                estado_texto,
-                observacion
+                f"${asignado:.2f}",
+                f"${pagado:.2f}",
+                f"${pendiente:.2f}",
+                f"{porcentaje:.0f}%"
             ])
         
-        tabla_gastos = Table(data_gastos, colWidths=[2*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+        tabla_gastos = Table(data_gastos, colWidths=[2*inch, 1.2*inch, 1.2*inch, 1.2*inch, 1*inch])
         tabla_gastos.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#16A085')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -1485,21 +1713,91 @@ def main():
         tabla_df = calcular_tabla_mensual(conn, mes_seleccionado, anio_seleccionado)
         
         if not tabla_df.empty:
-            # Mostrar la tabla con mejor formato
-            tabla_display = tabla_df.drop('id', axis=1).copy()
+            # Agregar columnas de monto pagado y pendiente
+            cursor = conn.cursor()
             
-            # Aplicar formato de colores
-            def colorear_fila(row):
-                if row['Ricardo Pagó'] == '✅' and row['Wendy Pagó'] == '✅':
-                    return ['background-color: #d4edda'] * len(row)  # Verde claro - ambos pagaron
-                elif row['Ricardo Pagó'] == '❌' and row['Wendy Pagó'] == '❌':
-                    return ['background-color: #f8d7da'] * len(row)  # Rojo claro - nadie pagó
-                else:
-                    return ['background-color: #fff3cd'] * len(row)  # Amarillo - pago parcial
+            tabla_df['Ricardo Pagado'] = 0.0
+            tabla_df['Ricardo Pendiente'] = 0.0
+            tabla_df['Ricardo %'] = 0.0
+            tabla_df['Wendy Pagado'] = 0.0
+            tabla_df['Wendy Pendiente'] = 0.0
+            tabla_df['Wendy %'] = 0.0
             
-            # Configuración de columnas para mejor visualización en móvil
+            for idx, row in tabla_df.iterrows():
+                gasto_id = row['id']
+                asignado_ricardo = row['Asignado Ricardo']
+                asignado_wendy = row['Asignado Wendy']
+                
+                # Calcular para Ricardo
+                try:
+                    if str(gasto_id).startswith('grupo_'):
+                        grupo_id = int(str(gasto_id).replace('grupo_', ''))
+                        query = """
+                            SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
+                            FROM pagos p
+                            INNER JOIN gastos_en_grupo geg ON p.gasto_id = geg.gasto_id
+                            WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Ricardo'
+                        """
+                        cursor.execute(query, (grupo_id, mes_seleccionado, anio_seleccionado))
+                    else:
+                        query = """
+                            SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
+                            FROM pagos
+                            WHERE gasto_id = ? AND mes = ? AND anio = ? AND quien_pago = 'Ricardo'
+                        """
+                        cursor.execute(query, (gasto_id, mes_seleccionado, anio_seleccionado))
+                    
+                    result = cursor.fetchone()
+                    ricardo_pagado = result[0] if result else 0.0
+                    ricardo_pendiente = max(0, asignado_ricardo - ricardo_pagado)
+                    ricardo_porcentaje = (ricardo_pagado / asignado_ricardo * 100) if asignado_ricardo > 0 else 0
+                    
+                    tabla_df.at[idx, 'Ricardo Pagado'] = ricardo_pagado
+                    tabla_df.at[idx, 'Ricardo Pendiente'] = ricardo_pendiente
+                    tabla_df.at[idx, 'Ricardo %'] = ricardo_porcentaje
+                except:
+                    pass
+                
+                # Calcular para Wendy
+                try:
+                    if str(gasto_id).startswith('grupo_'):
+                        grupo_id = int(str(gasto_id).replace('grupo_', ''))
+                        query = """
+                            SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
+                            FROM pagos p
+                            INNER JOIN gastos_en_grupo geg ON p.gasto_id = geg.gasto_id
+                            WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Wendy'
+                        """
+                        cursor.execute(query, (grupo_id, mes_seleccionado, anio_seleccionado))
+                    else:
+                        query = """
+                            SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
+                            FROM pagos
+                            WHERE gasto_id = ? AND mes = ? AND anio = ? AND quien_pago = 'Wendy'
+                        """
+                        cursor.execute(query, (gasto_id, mes_seleccionado, anio_seleccionado))
+                    
+                    result = cursor.fetchone()
+                    wendy_pagado = result[0] if result else 0.0
+                    wendy_pendiente = max(0, asignado_wendy - wendy_pagado)
+                    wendy_porcentaje = (wendy_pagado / asignado_wendy * 100) if asignado_wendy > 0 else 0
+                    
+                    tabla_df.at[idx, 'Wendy Pagado'] = wendy_pagado
+                    tabla_df.at[idx, 'Wendy Pendiente'] = wendy_pendiente
+                    tabla_df.at[idx, 'Wendy %'] = wendy_porcentaje
+                except:
+                    pass
+            
+            # Crear dos tablas separadas: una para Ricardo y otra para Wendy
+            st.subheader("👨 Tabla de Ricardo")
+            
+            # Tabla de Ricardo
+            columnas_ricardo = ['Concepto', 'Monto Total', 'Frecuencia', 'Asignado Ricardo',
+                               'Ricardo Pagado', 'Ricardo Pendiente', 'Ricardo %']
+            tabla_ricardo = tabla_df[columnas_ricardo].copy()
+            
             st.dataframe(
-                tabla_display,
+                tabla_ricardo,
                 use_container_width=True,
                 hide_index=True,
                 column_config={
@@ -1509,59 +1807,123 @@ def main():
                         help="Nombre del gasto"
                     ),
                     "Monto Total": st.column_config.NumberColumn(
-                        "Monto Total",
+                        "💰 Total",
                         format="$%.2f",
                         width="small"
                     ),
                     "Frecuencia": st.column_config.TextColumn(
-                        "Frecuencia",
+                        "📅 Frecuencia",
                         width="small"
                     ),
-                    "Debe Ricardo": st.column_config.NumberColumn(
-                        "Debe Ricardo",
+                    "Asignado Ricardo": st.column_config.NumberColumn(
+                        "💵 Asignado",
                         format="$%.2f",
-                        width="small"
+                        width="small",
+                        help="Monto asignado a Ricardo"
                     ),
-                    "Debe Wendy": st.column_config.NumberColumn(
-                        "Debe Wendy",
+                    "Ricardo Pagado": st.column_config.NumberColumn(
+                        "✅ Pagado",
                         format="$%.2f",
-                        width="small"
+                        width="small",
+                        help="Monto que Ricardo ya pagó"
                     ),
-                    "Ricardo Pagó": st.column_config.TextColumn(
-                        "Ricardo Pagó",
-                        width="small"
+                    "Ricardo Pendiente": st.column_config.NumberColumn(
+                        "⏳ Pendiente",
+                        format="$%.2f",
+                        width="small",
+                        help="Monto que le falta pagar a Ricardo"
                     ),
-                    "Wendy Pagó": st.column_config.TextColumn(
-                        "Wendy Pagó",
-                        width="small"
+                    "Ricardo %": st.column_config.NumberColumn(
+                        "📊 Progreso",
+                        format="%.0f%%",
+                        width="small",
+                        help="Porcentaje pagado por Ricardo"
                     )
                 }
             )
             
-            # Leyenda
-            col_leg1, col_leg2, col_leg3, col_leg4 = st.columns(4)
-            with col_leg1:
-                st.markdown("🟢 **Ambos pagaron** - Todo OK")
-            with col_leg2:
-                st.markdown("🟡 **Pago parcial** - Falta uno")
-            with col_leg3:
-                st.markdown("🔴 **Nadie pagó** - Pendiente")
-            with col_leg4:
-                st.markdown("📝 **Monto editado** - Específico del mes")
+            # Resumen de Ricardo
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                ricardo_asignado_total = tabla_df['Asignado Ricardo'].sum()
+                st.metric("💵 Asignado Total", f"${ricardo_asignado_total:.2f}")
+            with col2:
+                ricardo_pagado_total = tabla_df['Ricardo Pagado'].sum()
+                st.metric("✅ Ya Pagó", f"${ricardo_pagado_total:.2f}")
+            with col3:
+                ricardo_pendiente_total = tabla_df['Ricardo Pendiente'].sum()
+                progreso_ricardo = (ricardo_pagado_total / ricardo_asignado_total * 100) if ricardo_asignado_total > 0 else 0
+                st.metric("⏳ Pendiente", f"${ricardo_pendiente_total:.2f}", 
+                         delta=f"{progreso_ricardo:.0f}% pagado", delta_color="normal")
             
             st.markdown("---")
             
-            # Resumen rápido
+            # Tabla de Wendy
+            st.subheader("👩 Tabla de Wendy")
+            
+            columnas_wendy = ['Concepto', 'Monto Total', 'Frecuencia', 'Asignado Wendy',
+                             'Wendy Pagado', 'Wendy Pendiente', 'Wendy %']
+            tabla_wendy = tabla_df[columnas_wendy].copy()
+            
+            st.dataframe(
+                tabla_wendy,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Concepto": st.column_config.TextColumn(
+                        "Concepto",
+                        width="medium",
+                        help="Nombre del gasto"
+                    ),
+                    "Monto Total": st.column_config.NumberColumn(
+                        "💰 Total",
+                        format="$%.2f",
+                        width="small"
+                    ),
+                    "Frecuencia": st.column_config.TextColumn(
+                        "📅 Frecuencia",
+                        width="small"
+                    ),
+                    "Asignado Wendy": st.column_config.NumberColumn(
+                        "💵 Asignado",
+                        format="$%.2f",
+                        width="small",
+                        help="Monto asignado a Wendy"
+                    ),
+                    "Wendy Pagado": st.column_config.NumberColumn(
+                        "✅ Pagado",
+                        format="$%.2f",
+                        width="small",
+                        help="Monto que Wendy ya pagó"
+                    ),
+                    "Wendy Pendiente": st.column_config.NumberColumn(
+                        "⏳ Pendiente",
+                        format="$%.2f",
+                        width="small",
+                        help="Monto que le falta pagar a Wendy"
+                    ),
+                    "Wendy %": st.column_config.NumberColumn(
+                        "📊 Progreso",
+                        format="%.0f%%",
+                        width="small",
+                        help="Porcentaje pagado por Wendy"
+                    )
+                }
+            )
+            
+            # Resumen de Wendy
             col1, col2, col3 = st.columns(3)
             with col1:
-                total_gastos = tabla_df['Monto Total'].sum()
-                st.metric("💰 Total Gastos", f"${total_gastos:.2f}")
+                wendy_asignado_total = tabla_df['Asignado Wendy'].sum()
+                st.metric("💵 Asignado Total", f"${wendy_asignado_total:.2f}")
             with col2:
-                ricardo_pendiente = tabla_df[tabla_df['Ricardo Pagó'] == '❌']['Debe Ricardo'].sum()
-                st.metric("👨 Pendiente Ricardo", f"${ricardo_pendiente:.2f}")
+                wendy_pagado_total = tabla_df['Wendy Pagado'].sum()
+                st.metric("✅ Ya Pagó", f"${wendy_pagado_total:.2f}")
             with col3:
-                wendy_pendiente = tabla_df[tabla_df['Wendy Pagó'] == '❌']['Debe Wendy'].sum()
-                st.metric("👩 Pendiente Wendy", f"${wendy_pendiente:.2f}")
+                wendy_pendiente_total = tabla_df['Wendy Pendiente'].sum()
+                progreso_wendy = (wendy_pagado_total / wendy_asignado_total * 100) if wendy_asignado_total > 0 else 0
+                st.metric("⏳ Pendiente", f"${wendy_pendiente_total:.2f}",
+                         delta=f"{progreso_wendy:.0f}% pagado", delta_color="normal")
         else:
             st.warning("⚠️ No hay gastos mensuales configurados. Ve a la pestaña 'Gestionar Gastos' para agregar.")
     
@@ -2343,20 +2705,32 @@ def main():
         tabla_df = calcular_tabla_mensual(conn, mes_seleccionado, anio_seleccionado)
         saldo = calcular_saldo_neto(conn, mes_seleccionado, anio_seleccionado)
         
+        # Obtener totales específicos de cada persona
+        total_debe_ricardo = saldo.get('total_debe_ricardo', saldo['total_debe_cada_uno'])
+        total_debe_wendy = saldo.get('total_debe_wendy', saldo['total_debe_cada_uno'])
+        total_gastos = total_debe_ricardo + total_debe_wendy
+        
         col_prev1, col_prev2 = st.columns(2)
         
         with col_prev1:
-            st.write("**Resumen:**")
-            st.write(f"- Total gastos: ${saldo['total_debe_cada_uno'] * 2:.2f}")
-            st.write(f"- Debe c/u: ${saldo['total_debe_cada_uno']:.2f}")
-            st.write(f"- Pagado Ricardo: ${saldo['pagado_ricardo']:.2f}")
-            st.write(f"- Pagado Wendy: ${saldo['pagado_wendy']:.2f}")
+            st.write("**👨 Ricardo:**")
+            st.write(f"- Debe pagar: ${total_debe_ricardo:.2f}")
+            st.write(f"- Ya pagó: ${saldo['pagado_ricardo']:.2f}")
+            st.write(f"- Pendiente: ${saldo['saldo_ricardo']:.2f}")
+            ricardo_prog = (saldo['pagado_ricardo'] / total_debe_ricardo * 100) if total_debe_ricardo > 0 else 0
+            st.write(f"- Progreso: {ricardo_prog:.0f}%")
         
         with col_prev2:
-            st.write("**Pendientes:**")
-            st.write(f"- Ricardo: ${saldo['saldo_ricardo']:.2f}")
-            st.write(f"- Wendy: ${saldo['saldo_wendy']:.2f}")
-            st.write(f"- **Estado:** {saldo['mensaje']}")
+            st.write("**👩 Wendy:**")
+            st.write(f"- Debe pagar: ${total_debe_wendy:.2f}")
+            st.write(f"- Ya pagó: ${saldo['pagado_wendy']:.2f}")
+            st.write(f"- Pendiente: ${saldo['saldo_wendy']:.2f}")
+            wendy_prog = (saldo['pagado_wendy'] / total_debe_wendy * 100) if total_debe_wendy > 0 else 0
+            st.write(f"- Progreso: {wendy_prog:.0f}%")
+        
+        st.markdown("---")
+        st.write(f"**💰 Total Gastos del Mes:** ${total_gastos:.2f}")
+        st.write(f"**📊 Estado:** {saldo['mensaje']}")
         
         if not tabla_df.empty:
             st.write("**Detalle de Gastos:**")
@@ -2378,13 +2752,13 @@ def main():
                         "Frecuencia",
                         width="small"
                     ),
-                    "Debe Ricardo": st.column_config.NumberColumn(
-                        "Debe Ricardo",
+                    "Asignado Ricardo": st.column_config.NumberColumn(
+                        "Asignado Ricardo",
                         format="$%.2f",
                         width="small"
                     ),
-                    "Debe Wendy": st.column_config.NumberColumn(
-                        "Debe Wendy",
+                    "Asignado Wendy": st.column_config.NumberColumn(
+                        "Asignado Wendy",
                         format="$%.2f",
                         width="small"
                     ),
@@ -2561,7 +2935,7 @@ def main():
                 concepto = gasto['Concepto']
                 monto_total = gasto['Monto Total']
                 frecuencia = gasto['Frecuencia']
-                debe_pagar_total = gasto['Debe Ricardo']
+                debe_pagar_total = gasto['Asignado Ricardo']
                 
                 # Obtener cuánto ya pagó Ricardo para este gasto
                 ya_pago = 0
@@ -2662,7 +3036,7 @@ def main():
                 concepto = gasto['Concepto']
                 monto_total = gasto['Monto Total']
                 frecuencia = gasto['Frecuencia']
-                debe_pagar_total = gasto['Debe Wendy']
+                debe_pagar_total = gasto['Asignado Wendy']
                 
                 # Obtener cuánto ya pagó Wendy para este gasto
                 ya_pago = 0
