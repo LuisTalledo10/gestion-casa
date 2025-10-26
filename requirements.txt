@@ -1,0 +1,6 @@
+streamlit
+pywhatkit
+pandas
+plotly
+reportlab
+pypdf
