@@ -1341,14 +1341,16 @@ def main():
         )
     
     # Crear tabs para diferentes funcionalidades
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "📊 Tabla Mensual", 
         "💳 Pagar Gastos",
         "⚙️ Gestionar Gastos", 
         "🗑️ Eliminar Pagos",
         "📄 Reportes PDF",
         "📈 Estadísticas",
-        "💰 Resumen"
+        "💰 Resumen",
+        "👨 Ricardo",
+        "👩 Wendy"
     ])
     
     # ========== TAB 1: TABLA MENSUAL ==========
@@ -2541,6 +2543,206 @@ def main():
                 progreso_wendy = min(saldo['pagado_wendy'] / saldo['total_debe_cada_uno'], 1.0)
                 st.progress(progreso_wendy)
                 st.caption(f"{progreso_wendy*100:.1f}% pagado")
+    
+    # ========== TAB 8: INTERFAZ RICARDO ==========
+    with tab8:
+        st.header(f"👨 Interfaz de Ricardo - {meses[mes_seleccionado]} {anio_seleccionado}")
+        
+        # Obtener la tabla mensual completa
+        tabla_df = calcular_tabla_mensual(conn, mes_seleccionado, anio_seleccionado)
+        
+        if not tabla_df.empty:
+            # Calcular pagos realizados por Ricardo para cada gasto
+            gastos_con_info = []
+            cursor = conn.cursor()
+            
+            for _, gasto in tabla_df.iterrows():
+                gasto_id = gasto['id']
+                concepto = gasto['Concepto']
+                monto_total = gasto['Monto Total']
+                frecuencia = gasto['Frecuencia']
+                debe_pagar_total = gasto['Debe Ricardo']
+                ricardo_pago = gasto['Ricardo Pagó']
+                
+                # Si Ricardo no ha pagado completamente, calcular cuánto falta
+                if ricardo_pago == '❌':
+                    # Obtener cuánto ya pagó Ricardo para este gasto
+                    ya_pago = 0
+                    
+                    # Si es un grupo, necesitamos sumar los pagos de todos los gastos del grupo
+                    if str(gasto_id).startswith('grupo_'):
+                        grupo_id = int(str(gasto_id).replace('grupo_', ''))
+                        query = """
+                            SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
+                            FROM pagos p
+                            INNER JOIN gastos_en_grupo geg ON p.id_gasto = geg.gasto_id
+                            WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Ricardo'
+                        """
+                        cursor.execute(query, (grupo_id, mes_seleccionado, anio_seleccionado))
+                        result = cursor.fetchone()
+                        ya_pago = result[0] if result else 0
+                    else:
+                        query = """
+                            SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
+                            FROM pagos
+                            WHERE id_gasto = ? AND mes = ? AND anio = ? AND quien_pago = 'Ricardo'
+                        """
+                        cursor.execute(query, (gasto_id, mes_seleccionado, anio_seleccionado))
+                        result = cursor.fetchone()
+                        ya_pago = result[0] if result else 0
+                    
+                    pendiente = debe_pagar_total - ya_pago
+                    
+                    # Solo agregar si hay algo pendiente
+                    if pendiente > 0:
+                        gastos_con_info.append({
+                            'concepto': concepto,
+                            'monto_total': monto_total,
+                            'frecuencia': frecuencia,
+                            'debe_pagar_total': debe_pagar_total,
+                            'ya_pago': ya_pago,
+                            'pendiente': pendiente
+                        })
+            
+            if gastos_con_info:
+                st.info(f"💡 Tienes **{len(gastos_con_info)}** gastos pendientes por pagar")
+                
+                total_pendiente = 0
+                
+                for gasto_info in gastos_con_info:
+                    total_pendiente += gasto_info['pendiente']
+                    
+                    with st.container():
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        
+                        with col1:
+                            st.markdown(f"**{gasto_info['concepto']}**")
+                            st.caption(f"Frecuencia: {gasto_info['frecuencia']} | Total: ${gasto_info['monto_total']:.2f}")
+                        
+                        with col2:
+                            st.metric("Debes Pagar", f"${gasto_info['debe_pagar_total']:.2f}")
+                            if gasto_info['ya_pago'] > 0:
+                                st.caption(f"✅ Pagaste: ${gasto_info['ya_pago']:.2f}")
+                        
+                        with col3:
+                            st.metric("Pendiente", f"${gasto_info['pendiente']:.2f}")
+                        
+                        st.markdown("---")
+                
+                # Resumen total
+                st.subheader("📊 Resumen Total")
+                col_res1, col_res2 = st.columns(2)
+                with col_res1:
+                    st.metric("Total Pendiente", f"${total_pendiente:.2f}")
+                with col_res2:
+                    saldo = calcular_saldo_neto(conn, mes_seleccionado, anio_seleccionado)
+                    st.metric("Total Pagado", f"${saldo['pagado_ricardo']:.2f}")
+            else:
+                st.success("🎉 ¡Excelente! No tienes gastos pendientes por pagar este mes.")
+                saldo = calcular_saldo_neto(conn, mes_seleccionado, anio_seleccionado)
+                st.metric("Total Pagado", f"${saldo['pagado_ricardo']:.2f}")
+        else:
+            st.info("No hay gastos registrados para este mes.")
+    
+    # ========== TAB 9: INTERFAZ WENDY ==========
+    with tab9:
+        st.header(f"👩 Interfaz de Wendy - {meses[mes_seleccionado]} {anio_seleccionado}")
+        
+        # Obtener la tabla mensual completa
+        tabla_df = calcular_tabla_mensual(conn, mes_seleccionado, anio_seleccionado)
+        
+        if not tabla_df.empty:
+            # Calcular pagos realizados por Wendy para cada gasto
+            gastos_con_info = []
+            cursor = conn.cursor()
+            
+            for _, gasto in tabla_df.iterrows():
+                gasto_id = gasto['id']
+                concepto = gasto['Concepto']
+                monto_total = gasto['Monto Total']
+                frecuencia = gasto['Frecuencia']
+                debe_pagar_total = gasto['Debe Wendy']
+                wendy_pago = gasto['Wendy Pagó']
+                
+                # Si Wendy no ha pagado completamente, calcular cuánto falta
+                if wendy_pago == '❌':
+                    # Obtener cuánto ya pagó Wendy para este gasto
+                    ya_pago = 0
+                    
+                    # Si es un grupo, necesitamos sumar los pagos de todos los gastos del grupo
+                    if str(gasto_id).startswith('grupo_'):
+                        grupo_id = int(str(gasto_id).replace('grupo_', ''))
+                        query = """
+                            SELECT COALESCE(SUM(p.monto_pagado), 0) as total_pagado
+                            FROM pagos p
+                            INNER JOIN gastos_en_grupo geg ON p.id_gasto = geg.gasto_id
+                            WHERE geg.grupo_id = ? AND p.mes = ? AND p.anio = ? AND p.quien_pago = 'Wendy'
+                        """
+                        cursor.execute(query, (grupo_id, mes_seleccionado, anio_seleccionado))
+                        result = cursor.fetchone()
+                        ya_pago = result[0] if result else 0
+                    else:
+                        query = """
+                            SELECT COALESCE(SUM(monto_pagado), 0) as total_pagado
+                            FROM pagos
+                            WHERE id_gasto = ? AND mes = ? AND anio = ? AND quien_pago = 'Wendy'
+                        """
+                        cursor.execute(query, (gasto_id, mes_seleccionado, anio_seleccionado))
+                        result = cursor.fetchone()
+                        ya_pago = result[0] if result else 0
+                    
+                    pendiente = debe_pagar_total - ya_pago
+                    
+                    # Solo agregar si hay algo pendiente
+                    if pendiente > 0:
+                        gastos_con_info.append({
+                            'concepto': concepto,
+                            'monto_total': monto_total,
+                            'frecuencia': frecuencia,
+                            'debe_pagar_total': debe_pagar_total,
+                            'ya_pago': ya_pago,
+                            'pendiente': pendiente
+                        })
+            
+            if gastos_con_info:
+                st.info(f"💡 Tienes **{len(gastos_con_info)}** gastos pendientes por pagar")
+                
+                total_pendiente = 0
+                
+                for gasto_info in gastos_con_info:
+                    total_pendiente += gasto_info['pendiente']
+                    
+                    with st.container():
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        
+                        with col1:
+                            st.markdown(f"**{gasto_info['concepto']}**")
+                            st.caption(f"Frecuencia: {gasto_info['frecuencia']} | Total: ${gasto_info['monto_total']:.2f}")
+                        
+                        with col2:
+                            st.metric("Debes Pagar", f"${gasto_info['debe_pagar_total']:.2f}")
+                            if gasto_info['ya_pago'] > 0:
+                                st.caption(f"✅ Pagaste: ${gasto_info['ya_pago']:.2f}")
+                        
+                        with col3:
+                            st.metric("Pendiente", f"${gasto_info['pendiente']:.2f}")
+                        
+                        st.markdown("---")
+                
+                # Resumen total
+                st.subheader("📊 Resumen Total")
+                col_res1, col_res2 = st.columns(2)
+                with col_res1:
+                    st.metric("Total Pendiente", f"${total_pendiente:.2f}")
+                with col_res2:
+                    saldo = calcular_saldo_neto(conn, mes_seleccionado, anio_seleccionado)
+                    st.metric("Total Pagado", f"${saldo['pagado_wendy']:.2f}")
+            else:
+                st.success("🎉 ¡Excelente! No tienes gastos pendientes por pagar este mes.")
+                saldo = calcular_saldo_neto(conn, mes_seleccionado, anio_seleccionado)
+                st.metric("Total Pagado", f"${saldo['pagado_wendy']:.2f}")
+        else:
+            st.info("No hay gastos registrados para este mes.")
 
 if __name__ == "__main__":
     main()
