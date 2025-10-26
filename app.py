@@ -1445,10 +1445,45 @@ def main():
                 else:
                     return ['background-color: #fff3cd'] * len(row)  # Amarillo - pago parcial
             
+            # Configuración de columnas para mejor visualización en móvil
             st.dataframe(
                 tabla_display,
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                column_config={
+                    "Concepto": st.column_config.TextColumn(
+                        "Concepto",
+                        width="medium",
+                        help="Nombre del gasto"
+                    ),
+                    "Monto Total": st.column_config.NumberColumn(
+                        "Monto Total",
+                        format="$%.2f",
+                        width="small"
+                    ),
+                    "Frecuencia": st.column_config.TextColumn(
+                        "Frecuencia",
+                        width="small"
+                    ),
+                    "Debe Ricardo": st.column_config.NumberColumn(
+                        "Debe Ricardo",
+                        format="$%.2f",
+                        width="small"
+                    ),
+                    "Debe Wendy": st.column_config.NumberColumn(
+                        "Debe Wendy",
+                        format="$%.2f",
+                        width="small"
+                    ),
+                    "Ricardo Pagó": st.column_config.TextColumn(
+                        "Ricardo Pagó",
+                        width="small"
+                    ),
+                    "Wendy Pagó": st.column_config.TextColumn(
+                        "Wendy Pagó",
+                        width="small"
+                    )
+                }
             )
             
             # Leyenda
@@ -2268,7 +2303,44 @@ def main():
         
         if not tabla_df.empty:
             st.write("**Detalle de Gastos:**")
-            st.dataframe(tabla_df.drop('id', axis=1), use_container_width=True, hide_index=True)
+            st.dataframe(
+                tabla_df.drop('id', axis=1), 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Concepto": st.column_config.TextColumn(
+                        "Concepto",
+                        width="medium"
+                    ),
+                    "Monto Total": st.column_config.NumberColumn(
+                        "Monto Total",
+                        format="$%.2f",
+                        width="small"
+                    ),
+                    "Frecuencia": st.column_config.TextColumn(
+                        "Frecuencia",
+                        width="small"
+                    ),
+                    "Debe Ricardo": st.column_config.NumberColumn(
+                        "Debe Ricardo",
+                        format="$%.2f",
+                        width="small"
+                    ),
+                    "Debe Wendy": st.column_config.NumberColumn(
+                        "Debe Wendy",
+                        format="$%.2f",
+                        width="small"
+                    ),
+                    "Ricardo Pagó": st.column_config.TextColumn(
+                        "Ricardo Pagó",
+                        width="small"
+                    ),
+                    "Wendy Pagó": st.column_config.TextColumn(
+                        "Wendy Pagó",
+                        width="small"
+                    )
+                }
+            )
     
     # ========== TAB 6: ESTADÍSTICAS ==========
     with tab6:
@@ -2306,7 +2378,29 @@ def main():
             pagos_display.columns = ['Concepto', 'Quien Pagó', 'Monto', 'Fecha']
             pagos_display['Monto'] = pagos_display['Monto'].apply(lambda x: f"${x:.2f}")
             
-            st.dataframe(pagos_display, use_container_width=True, hide_index=True)
+            st.dataframe(
+                pagos_display, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Concepto": st.column_config.TextColumn(
+                        "Concepto",
+                        width="medium"
+                    ),
+                    "Quien Pagó": st.column_config.TextColumn(
+                        "Quien Pagó",
+                        width="small"
+                    ),
+                    "Monto": st.column_config.TextColumn(
+                        "Monto",
+                        width="small"
+                    ),
+                    "Fecha": st.column_config.TextColumn(
+                        "Fecha",
+                        width="small"
+                    )
+                }
+            )
         else:
             st.info("No hay pagos registrados para este mes.")
     
