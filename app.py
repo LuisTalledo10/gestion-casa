@@ -2164,7 +2164,12 @@ def main():
                     col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
                     
                     with col1:
-                        st.write(f"**{pago['concepto']}**")
+                        # Mostrar el concepto y si es semanal, el número de semana
+                        if pago['frecuencia'] == 'Semanal' and pago['semana'] is not None:
+                            rango = obtener_rango_semana(mes_seleccionado, anio_seleccionado, int(pago['semana']))
+                            st.write(f"**{pago['concepto']}** 📅 Semana {int(pago['semana'])} ({rango[0]}-{rango[1]})")
+                        else:
+                            st.write(f"**{pago['concepto']}**")
                     
                     with col2:
                         st.write(f"💵 ${pago['monto_pagado']:.2f}")
