@@ -884,10 +884,36 @@ def crear_grafico_gastos_tiempo(conn):
                   labels={'periodo': 'Mes', 'total': 'Monto ($)', 'quien_pago': 'Persona'},
                   markers=True)
     
-    # Agregar línea vertical para marcar el mes actual
+    # Agregar shape para marcar el mes actual si existe en los datos
     if periodo_actual in df['periodo'].values:
-        fig.add_vline(x=periodo_actual, line_dash="dash", line_color="red",
-                      annotation_text="📅 Mes Actual", annotation_position="top")
+        # Encontrar el índice del periodo actual
+        periodos_unicos = sorted(df['periodo'].unique())
+        try:
+            idx = periodos_unicos.index(periodo_actual)
+            
+            # Agregar una forma vertical para resaltar el mes actual
+            fig.add_shape(
+                type="line",
+                x0=idx, x1=idx,
+                y0=0, y1=1,
+                yref="paper",
+                line=dict(color="red", width=2, dash="dash")
+            )
+            
+            # Agregar anotación
+            max_y = df['total'].max()
+            fig.add_annotation(
+                x=idx,
+                y=max_y * 1.1,
+                text="📅 Mes Actual",
+                showarrow=True,
+                arrowhead=2,
+                arrowcolor="red",
+                ax=0,
+                ay=-40
+            )
+        except (ValueError, IndexError):
+            pass  # Si hay algún error, simplemente no agregamos la marca
     
     fig.update_layout(hovermode='x unified')
     return fig
