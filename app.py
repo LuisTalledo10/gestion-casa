@@ -859,7 +859,7 @@ def calcular_saldo_neto(conn, mes, anio):
 
 def crear_grafico_gastos_tiempo(conn):
     """
-    Crea un gráfico de gastos en el tiempo.
+    Crea un gráfico de gastos en el tiempo con indicador de fecha actual.
     """
     query = """
         SELECT 
@@ -875,10 +875,19 @@ def crear_grafico_gastos_tiempo(conn):
     if df.empty:
         return None
     
+    # Obtener fecha actual
+    fecha_actual = datetime.now()
+    periodo_actual = f"{fecha_actual.year}-{fecha_actual.month:02d}"
+    
     fig = px.line(df, x='periodo', y='total', color='quien_pago',
-                  title='Gastos en el Tiempo',
+                  title=f'Gastos en el Tiempo (Hoy: {fecha_actual.day}/{fecha_actual.month}/{fecha_actual.year})',
                   labels={'periodo': 'Mes', 'total': 'Monto ($)', 'quien_pago': 'Persona'},
                   markers=True)
+    
+    # Agregar línea vertical para marcar el mes actual
+    if periodo_actual in df['periodo'].values:
+        fig.add_vline(x=periodo_actual, line_dash="dash", line_color="red",
+                      annotation_text="📅 Mes Actual", annotation_position="top")
     
     fig.update_layout(hovermode='x unified')
     return fig
