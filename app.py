@@ -863,11 +863,11 @@ def crear_grafico_gastos_tiempo(conn):
     """
     query = """
         SELECT 
-            p.anio || '-' || printf('%02d', p.mes) as periodo,
+            p.anio || '-' || printf('%02d', p.mes) || '-01' as periodo,
             SUM(p.monto_pagado) as total,
             p.quien_pago
         FROM pagos p
-        GROUP BY periodo, p.quien_pago
+        GROUP BY p.anio, p.mes, p.quien_pago
         ORDER BY p.anio, p.mes
     """
     df = pd.read_sql_query(query, conn)
@@ -875,47 +875,52 @@ def crear_grafico_gastos_tiempo(conn):
     if df.empty:
         return None
     
+    # Convertir periodo a datetime para ordenamiento correcto
+    df['periodo'] = pd.to_datetime(df['periodo'])
+    
     # Obtener fecha actual
     fecha_actual = datetime.now()
-    periodo_actual = f"{fecha_actual.year}-{fecha_actual.month:02d}"
+    # Crear timestamp para la fecha actual
+    periodo_actual = pd.to_datetime(f"{fecha_actual.year}-{fecha_actual.month:02d}-{fecha_actual.day:02d}")
     
+    # Crear gráfico
     fig = px.line(df, x='periodo', y='total', color='quien_pago',
                   title=f'Gastos en el Tiempo (Hoy: {fecha_actual.day}/{fecha_actual.month}/{fecha_actual.year})',
                   labels={'periodo': 'Mes', 'total': 'Monto ($)', 'quien_pago': 'Persona'},
                   markers=True)
     
-    # Agregar shape para marcar el mes actual si existe en los datos
-    if periodo_actual in df['periodo'].values:
-        # Encontrar el índice del periodo actual
-        periodos_unicos = sorted(df['periodo'].unique())
-        try:
-            idx = periodos_unicos.index(periodo_actual)
-            
-            # Agregar una forma vertical para resaltar el mes actual
-            fig.add_shape(
-                type="line",
-                x0=idx, x1=idx,
-                y0=0, y1=1,
-                yref="paper",
-                line=dict(color="red", width=2, dash="dash")
-            )
-            
-            # Agregar anotación
-            max_y = df['total'].max()
-            fig.add_annotation(
-                x=idx,
-                y=max_y * 1.1,
-                text="📅 Mes Actual",
-                showarrow=True,
-                arrowhead=2,
-                arrowcolor="red",
-                ax=0,
-                ay=-40
-            )
-        except (ValueError, IndexError):
-            pass  # Si hay algún error, simplemente no agregamos la marca
+    # Marcar la fecha actual con una línea vertical usando add_shape
+    fig.add_shape(
+        type="line",
+        x0=periodo_actual,
+        x1=periodo_actual,
+        y0=0,
+        y1=1,
+        yref="paper",
+        line=dict(color="red", width=2, dash="dash")
+    )
     
-    fig.update_layout(hovermode='x unified')
+    # Agregar anotación para la fecha actual
+    fig.add_annotation(
+        x=periodo_actual,
+        y=1,
+        yref="paper",
+        text=f"📅 Hoy ({fecha_actual.day}/{fecha_actual.month})",
+        showarrow=False,
+        yshift=10
+    )
+    
+    fig.update_xaxes(
+        title="Fecha",
+        tickformat="%b %Y"  # Formato: Oct 2025
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        yaxis_title="Monto ($)",
+        showlegend=True
+    )
+    
     return fig
 
 def crear_grafico_distribucion(conn, mes, anio):
