@@ -4,3 +4,5 @@ pandas
 plotly
 reportlab
 pypdf
+gspread
+oauth2client

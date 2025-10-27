@@ -3,6 +3,14 @@
 *.sqlite
 *.sqlite3
 
+# Secrets de Streamlit (contiene credenciales de Google)
+.streamlit/secrets.toml
+.streamlit/config.toml
+
+# Credenciales de Google Cloud
+*-credentials.json
+service-account*.json
+
 # Python
 __pycache__/
 *.py[cod]
