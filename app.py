@@ -3,14 +3,15 @@ Aplicación de Gestión de Contabilidad Doméstica
 Sistema de gastos compartidos entre Ricardo y Wendy
 
 Instalación de dependencias:
-pip install streamlit plotly pandas
+pip install streamlit plotly pandas gspread oauth2client
 
 Para ejecutar la aplicación:
 streamlit run app.py
+
+NOTA: Usa Google Sheets como base de datos para persistencia en la nube
 """
 
 import streamlit as st
-import sqlite3
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -25,152 +26,150 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 import io
 
+# Importar el módulo de Google Sheets
+try:
+    from google_sheets_db import GoogleSheetsDB
+    USAR_GOOGLE_SHEETS = True
+except Exception as e:
+    st.error(f"⚠️ Error importando GoogleSheetsDB: {e}")
+    st.info("Asegúrate de tener configurado .streamlit/secrets.toml")
+    USAR_GOOGLE_SHEETS = False
+
 # ==================== CONFIGURACIÓN DE LA BASE DE DATOS ====================
+
+@st.cache_resource
+def get_database():
+    """
+    Obtiene la instancia de la base de datos (Google Sheets).
+    Usa cache para no reconectar en cada interacción.
+    
+    Returns:
+        GoogleSheetsDB: Instancia de la base de datos
+    """
+    if not USAR_GOOGLE_SHEETS:
+        st.error("❌ Google Sheets no está disponible. Verifica la configuración.")
+        st.stop()
+    
+    try:
+        db = GoogleSheetsDB()
+        # Inicializar las tablas si es la primera vez
+        db.inicializar_todas_las_tablas()
+        return db
+    except Exception as e:
+        st.error(f"❌ Error conectando con Google Sheets: {str(e)}")
+        st.info("""
+        ### 🔧 Para configurar Google Sheets:
+        
+        1. Lee el archivo `GOOGLE_SHEETS_SETUP.md`
+        2. Configura tus credenciales en `.streamlit/secrets.toml`
+        3. Comparte tu spreadsheet con la cuenta de servicio
+        """)
+        st.stop()
 
 def conectar_db():
     """
-    Conecta a la base de datos SQLite y crea las tablas si no existen.
+    Función de compatibilidad que devuelve la base de datos de Google Sheets.
+    Mantiene la misma interfaz que antes para facilitar la migración.
+    
     Returns:
-        conn: Objeto de conexión a la base de datos
+        GoogleSheetsDB: Instancia de la base de datos
     """
-    conn = sqlite3.connect('contabilidad.db', check_same_thread=False)
-    cursor = conn.cursor()
-    
-    # Crear tabla de gastos mensuales (solo concepto y frecuencia)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS gastos_mensuales (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            concepto TEXT NOT NULL,
-            monto_total REAL NOT NULL,
-            frecuencia TEXT NOT NULL,
-            tipo_monto TEXT DEFAULT 'fijo',
-            tipo_distribucion TEXT DEFAULT '50/50',
-            monto_fijo_ricardo REAL DEFAULT NULL,
-            monto_fijo_wendy REAL DEFAULT NULL,
-            porcentaje_ricardo REAL DEFAULT 50.0,
-            grupo TEXT DEFAULT NULL,
-            activo INTEGER DEFAULT 1,
-            fecha_creacion TEXT NOT NULL
-        )
-    ''')
-    
-    # Crear tabla de montos por mes (para gastos que varían)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS montos_mensuales (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            gasto_id INTEGER NOT NULL,
-            mes INTEGER NOT NULL,
-            anio INTEGER NOT NULL,
-            monto_total REAL NOT NULL,
-            fecha_registro TEXT NOT NULL,
-            FOREIGN KEY (gasto_id) REFERENCES gastos_mensuales(id),
-            UNIQUE(gasto_id, mes, anio)
-        )
-    ''')
-    
-    # Crear tabla de pagos individuales
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS pagos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            gasto_id INTEGER NOT NULL,
-            mes INTEGER NOT NULL,
-            anio INTEGER NOT NULL,
-            quien_pago TEXT NOT NULL,
-            monto_pagado REAL NOT NULL,
-            fecha_pago TEXT NOT NULL,
-            semana INTEGER DEFAULT NULL,
-            FOREIGN KEY (gasto_id) REFERENCES gastos_mensuales(id)
-        )
-    ''')
-    
-    # Crear tabla de grupos de distribución
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS grupos_distribucion (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT NOT NULL,
-            descripcion TEXT,
-            monto_fijo_ricardo REAL DEFAULT NULL,
-            monto_fijo_wendy REAL DEFAULT NULL,
-            quien_paga_fijo TEXT NOT NULL,
-            activo INTEGER DEFAULT 1,
-            fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Crear tabla de gastos en grupo
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS gastos_en_grupo (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            grupo_id INTEGER NOT NULL,
-            gasto_id INTEGER NOT NULL,
-            FOREIGN KEY (grupo_id) REFERENCES grupos_distribucion(id),
-            FOREIGN KEY (gasto_id) REFERENCES gastos_mensuales(id),
-            UNIQUE(grupo_id, gasto_id)
-        )
-    ''')
-    
-    conn.commit()
-    return conn
+    return get_database()
 
 # ==================== FUNCIONES CRUD GASTOS MENSUALES ====================
 
-def crear_gasto_mensual(conn, concepto, monto_total, frecuencia, tipo_monto='fijo',
+def crear_gasto_mensual(db, concepto, monto_total, frecuencia, tipo_monto='fijo',
                        tipo_distribucion='50/50', monto_fijo_ricardo=None, monto_fijo_wendy=None,
                        porcentaje_ricardo=50.0, grupo=None):
     """
     Crea un nuevo gasto mensual recurrente con distribución personalizada.
     tipo_monto: 'fijo' o 'variable'
     tipo_distribucion: '50/50', 'fijo_ricardo', 'fijo_wendy', 'personalizado'
+    
+    NOTA: Adaptado para Google Sheets
     """
-    cursor = conn.cursor()
-    fecha_actual = datetime.now().strftime('%Y-%m-%d')
-    cursor.execute('''
-        INSERT INTO gastos_mensuales (concepto, monto_total, frecuencia, tipo_monto,
-                                      tipo_distribucion, monto_fijo_ricardo, monto_fijo_wendy,
-                                      porcentaje_ricardo, grupo, fecha_creacion)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (concepto, monto_total, frecuencia, tipo_monto, tipo_distribucion,
-          monto_fijo_ricardo, monto_fijo_wendy, porcentaje_ricardo, grupo, fecha_actual))
-    conn.commit()
-    return True
+    try:
+        # Calcular distribución según el tipo
+        if tipo_distribucion == '50/50':
+            dist_ricardo = 50.0
+            dist_wendy = 50.0
+        elif tipo_distribucion == 'fijo_ricardo':
+            dist_ricardo = monto_fijo_ricardo if monto_fijo_ricardo else monto_total
+            dist_wendy = 0
+        elif tipo_distribucion == 'fijo_wendy':
+            dist_ricardo = 0
+            dist_wendy = monto_fijo_wendy if monto_fijo_wendy else monto_total
+        elif tipo_distribucion == 'personalizado':
+            dist_ricardo = porcentaje_ricardo
+            dist_wendy = 100 - porcentaje_ricardo
+        else:
+            dist_ricardo = 50.0
+            dist_wendy = 50.0
+        
+        # Insertar en Google Sheets
+        gasto_id = db.insertar_gasto_mensual(concepto, monto_total, frecuencia, dist_ricardo, dist_wendy)
+        return True
+    except Exception as e:
+        st.error(f"Error al crear gasto: {e}")
+        return False
 
-def leer_gastos_mensuales(conn, solo_activos=True):
+def leer_gastos_mensuales(db, solo_activos=True):
     """
     Lee todos los gastos mensuales.
+    
+    NOTA: Adaptado para Google Sheets
     """
-    if solo_activos:
-        query = "SELECT * FROM gastos_mensuales WHERE activo = 1 ORDER BY concepto"
-    else:
-        query = "SELECT * FROM gastos_mensuales ORDER BY concepto"
-    df = pd.read_sql_query(query, conn)
-    return df
+    try:
+        df = db.obtener_gastos_mensuales()
+        return df
+    except Exception as e:
+        st.error(f"Error al leer gastos: {e}")
+        return pd.DataFrame()
 
-def actualizar_gasto_mensual(conn, id_gasto, concepto, monto_total, frecuencia, tipo_monto,
+def actualizar_gasto_mensual(db, id_gasto, concepto, monto_total, frecuencia, tipo_monto,
                             tipo_distribucion='50/50', monto_fijo_ricardo=None, monto_fijo_wendy=None,
                             porcentaje_ricardo=50.0, grupo=None):
     """
     Actualiza un gasto mensual con distribución personalizada.
+    
+    NOTA: Adaptado para Google Sheets
     """
-    cursor = conn.cursor()
-    cursor.execute('''
-        UPDATE gastos_mensuales
-        SET concepto = ?, monto_total = ?, frecuencia = ?, tipo_monto = ?,
-            tipo_distribucion = ?, monto_fijo_ricardo = ?, monto_fijo_wendy = ?,
-            porcentaje_ricardo = ?, grupo = ?
-        WHERE id = ?
-    ''', (concepto, monto_total, frecuencia, tipo_monto, tipo_distribucion,
-          monto_fijo_ricardo, monto_fijo_wendy, porcentaje_ricardo, grupo, id_gasto))
-    conn.commit()
-    return cursor.rowcount > 0
+    try:
+        # Calcular distribución
+        if tipo_distribucion == '50/50':
+            dist_ricardo = 50.0
+            dist_wendy = 50.0
+        elif tipo_distribucion == 'fijo_ricardo':
+            dist_ricardo = monto_fijo_ricardo if monto_fijo_ricardo else monto_total
+            dist_wendy = 0
+        elif tipo_distribucion == 'fijo_wendy':
+            dist_ricardo = 0
+            dist_wendy = monto_fijo_wendy if monto_fijo_wendy else monto_total
+        elif tipo_distribucion == 'personalizado':
+            dist_ricardo = porcentaje_ricardo
+            dist_wendy = 100 - porcentaje_ricardo
+        else:
+            dist_ricardo = 50.0
+            dist_wendy = 50.0
+        
+        db.actualizar_gasto_mensual(id_gasto, concepto, monto_total, frecuencia, dist_ricardo, dist_wendy)
+        return True
+    except Exception as e:
+        st.error(f"Error al actualizar gasto: {e}")
+        return False
 
-def desactivar_gasto_mensual(conn, id_gasto):
+def desactivar_gasto_mensual(db, id_gasto):
     """
-    Desactiva un gasto mensual (no lo borra, solo lo marca como inactivo).
+    Desactiva un gasto mensual (eliminándolo de Google Sheets).
+    
+    NOTA: Adaptado para Google Sheets
     """
-    cursor = conn.cursor()
-    cursor.execute('UPDATE gastos_mensuales SET activo = 0 WHERE id = ?', (id_gasto,))
-    conn.commit()
-    return cursor.rowcount > 0
+    try:
+        db.eliminar_gasto_mensual(id_gasto)
+        return True
+    except Exception as e:
+        st.error(f"Error al eliminar gasto: {e}")
+        return False
 
 # ==================== FUNCIONES DE MONTOS MENSUALES ====================
 
